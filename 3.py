@@ -7,28 +7,28 @@ import os
 load_dotenv()
 
 # Define the API endpoints and keys from environment variables
-url = os.getenv("API_URL")
-key = os.getenv("API_KEY")
-llm_url = os.getenv("API_LLM_URL")
-login = os.getenv("LOGIN")
-password = os.getenv("PASSWORD")
+API_URL = os.getenv("API_URL")
+API_KEY = os.getenv("API_KEY")
+API_LLM_URL = os.getenv("API_LLM_URL")
+LOGIN = os.getenv("LOGIN")
+PASSWORD = os.getenv("PASSWORD")
 
 # Encode login credentials for Basic Authentication
-def encode_authentication(login, password):
+def auth_encode_basic(login, password):
     auth = base64.b64encode(f"{login}:{password}".encode()).decode()
     return auth
 
 # Prepare headers for the API requests
-def create_headers(auth=None):
+def api_create_headers(auth=None):
     headers = {
-        "Authorization": f"Basic {auth}" if auth else f"Bearer {key}",
+        "Authorization": f"Basic {auth}" if auth else f"Bearer {API_KEY}",
         "Content-Type": "application/json"
     }
     return headers
 
 # Send GET request to search for issues
-def get_issues(url, headers, params):
-    response = requests.get(url + "api/issues/search", headers=headers, params=params)
+def sonar_get_issues(api_url, headers, params):
+    response = requests.get(api_url + "api/issues/search", headers=headers, params=params)
     if response.status_code == 200:
         print("Issues searched successfully!")
         return response.json()
@@ -38,7 +38,7 @@ def get_issues(url, headers, params):
         return None
 
 # Send POST request to LLM API for processing
-def send_to_llm(llm_url, headers, data):
+def llm_send_request(llm_url, headers, data):
     response = requests.post(llm_url, json=data, headers=headers)
     if response.status_code == 200:
         return response.json()
@@ -47,12 +47,10 @@ def send_to_llm(llm_url, headers, data):
         print(response.text)  # For debugging
         return None
 
-# Main function to process issues and get responses
-def process_issues(issues):
-    i = 1
-    for issue in issues:
+# Process issues and get responses
+def process_sonar_issues(issues):
+    for i, issue in enumerate(issues, start=1):
         print(f"Processing issue: {i}")
-        i += 1
 
         # Extract issue details
         issue_key = issue['key']
@@ -60,8 +58,8 @@ def process_issues(issues):
         component = issue['component']
         severity = issue['severity']
         project = issue['project']
-        line = issue['line']
-        text_range = issue['textRange']
+        line = issue.get('line', 'N/A')
+        text_range = issue.get('textRange', {})
         message = issue['message']
 
         # Print issue details
@@ -73,8 +71,8 @@ def process_issues(issues):
         print(f"Message: {message}")
 
         # Extract file path and line number
-        file_name = component.split(':')[1]
-        file_path_line = f"{file_name}:{text_range['startLine']}"
+        file_name = component.split(':')[1] if ':' in component else component
+        file_path_line = f"{file_name}:{text_range.get('startLine', 'Unknown')}"
         print(f"File Path: {file_path_line}")
 
         # Prepare data for LLM request
@@ -86,7 +84,7 @@ def process_issues(issues):
         }
 
         # Send request to LLM API
-        llm_response = send_to_llm(llm_url, create_headers(), data_llm)
+        llm_response = llm_send_request(API_LLM_URL, api_create_headers(), data_llm)
 
         if llm_response:
             assistant_message = llm_response["choices"][0]["message"]["content"]
@@ -97,10 +95,10 @@ def process_issues(issues):
 # Main execution
 def main():
     # Get authentication token
-    auth = encode_authentication(login, password)
+    auth = auth_encode_basic(LOGIN, PASSWORD)
 
     # Create headers
-    headers = create_headers(auth)
+    headers = api_create_headers(auth)
 
     # Define parameters for issue search
     payload_issues = {
@@ -109,12 +107,12 @@ def main():
     }
 
     # Get the issues from the API
-    issues_data = get_issues(url, headers, payload_issues)
+    issues_data = sonar_get_issues(API_URL, headers, payload_issues)
 
     if issues_data:
         issues = issues_data.get('issues', [])
         if issues:
-            process_issues(issues)
+            process_sonar_issues(issues)
         else:
             print("No issues found.")
     else:

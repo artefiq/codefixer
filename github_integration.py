@@ -14,7 +14,7 @@ LOCAL_REPO_PATH = LOCAL_PATH + "github-api-test"
 CLONE_REPO_URL = os.getenv("CLONE_REPO_URL")
 
 # Fungsi untuk menjalankan perintah Git
-def run_git_command(command, repo_path):
+def git_run_command(command, repo_path):
     try:
         result = subprocess.run(
             command,
@@ -29,7 +29,7 @@ def run_git_command(command, repo_path):
         print(f"Error: {e.stderr}")
 
 # Fungsi untuk membuat repositori baru di GitHub
-def create_github_repo(repo_name):
+def github_create_repo(repo_name):
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
         "Accept": "application/vnd.github.v3+json"
@@ -45,7 +45,7 @@ def create_github_repo(repo_name):
     else:
         raise Exception(f"Failed to create repository: {response.status_code} {response.text}")
 
-def delete_github_repo(repo_name):
+def github_delete_repo(repo_name):
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
         "Accept": "application/vnd.github.v3+json"
@@ -58,7 +58,7 @@ def delete_github_repo(repo_name):
         raise Exception(f"Failed to delete repository: {response.status_code} {response.text}")
 
 # Fungsi untuk menulis perubahan pada file
-def modify_file(file_path, content):
+def file_modify(file_path, content):
     with open(file_path, "w") as file:
         file.write(content)
 
@@ -66,42 +66,43 @@ def modify_file(file_path, content):
 def main():
     try:
         # 1. Clone repository
-        run_git_command(["git", "clone", CLONE_REPO_URL], LOCAL_REPO_PATH)
+        git_run_command(["git", "clone", CLONE_REPO_URL], LOCAL_REPO_PATH)
         print(f"Cloned repository to {LOCAL_REPO_PATH}")
 
         # 2. Create new repository on GitHub
-        new_repo_ssh_url = create_github_repo(NEW_REPO_NAME)
+        new_repo_ssh_url = github_create_repo(NEW_REPO_NAME)
         print(f"New repository SSH URL: {new_repo_ssh_url}")
 
         # 3. Change repository origin
-        run_git_command(["git", "remote", "remove", "origin"], LOCAL_REPO_PATH + "/" + NEW_REPO_NAME)
-        run_git_command(["git", "remote", "add", "origin", f"https://github.com/{GITHUB_USERNAME}/{NEW_REPO_NAME}"], LOCAL_REPO_PATH + "/" + NEW_REPO_NAME)
+        repo_dir = os.path.join(LOCAL_REPO_PATH, NEW_REPO_NAME)
+        git_run_command(["git", "remote", "remove", "origin"], repo_dir)
+        git_run_command(["git", "remote", "add", "origin", f"https://github.com/{GITHUB_USERNAME}/{NEW_REPO_NAME}"], repo_dir)
 
         # 4. Push to the new repo
-        run_git_command(["git", "push", "origin", "main"], LOCAL_REPO_PATH + "/" + NEW_REPO_NAME)
+        git_run_command(["git", "push", "origin", "main"], repo_dir)
         print("Pushed changes to new repository")
 
         # 5. Make a new branch named "other_branch_test"
         new_branch_name = "other_branch_test"
-        run_git_command(["git", "checkout", "-b", new_branch_name], LOCAL_REPO_PATH + "/" + NEW_REPO_NAME)
+        git_run_command(["git", "checkout", "-b", new_branch_name], repo_dir)
 
         # 6. Modify file in the cloned repository
-        modify_file(os.path.join(LOCAL_REPO_PATH + "/" + NEW_REPO_NAME, "README.md"), "# New Change")
+        file_modify(os.path.join(repo_dir, "README.md"), "# New Change")
         print("Modified README.md")
 
         # 7. Add modified file to staging and commit
-        run_git_command(["git", "add", "."], LOCAL_REPO_PATH + "/" + NEW_REPO_NAME)
-        run_git_command(["git", "commit", "-m", "Initial commit for new branch"], LOCAL_REPO_PATH + "/" + NEW_REPO_NAME)
+        git_run_command(["git", "add", "."], repo_dir)
+        git_run_command(["git", "commit", "-m", "Initial commit for new branch"], repo_dir)
 
-        # 7. Push the changes to new branch
-        run_git_command(["git", "push", "-u", "origin", new_branch_name], LOCAL_REPO_PATH + "/" + NEW_REPO_NAME)
+        # 8. Push the changes to new branch
+        git_run_command(["git", "push", "-u", "origin", new_branch_name], repo_dir)
 
-        # 6. Try pull request
-        run_git_command(["git", "pull", "origin", new_branch_name], LOCAL_REPO_PATH + "/" + NEW_REPO_NAME)
+        # 9. Try pull request
+        git_run_command(["git", "pull", "origin", new_branch_name], repo_dir)
 
-        # 8. Delete the repo
-        delete_github_repo(NEW_REPO_NAME)
-        print(f"Repository {NEW_REPO_NAME} deleted succesfully.")
+        # 10. Delete the repo
+        github_delete_repo(NEW_REPO_NAME)
+        print(f"Repository {NEW_REPO_NAME} deleted successfully.")
 
     except Exception as e:
         print(f"Error: {e}")

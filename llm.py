@@ -2,20 +2,21 @@ import requests
 from dotenv import load_dotenv
 import os
 import json
+import re
 
 # Load environment variables
 load_dotenv()
 
 # Define the API endpoints and keys from environment variables
-url = os.getenv("API_URL")
-key = os.getenv("API_KEY")
-llm_url = os.getenv("API_LLM_URL")
-login = os.getenv("LOGIN")
-password = os.getenv("PASSWORD")
-local_path = os.getenv("LOCAL_PATH")
+API_URL = os.getenv("API_URL")
+API_KEY = os.getenv("API_KEY")
+API_LLM_URL = os.getenv("API_LLM_URL")
+LOGIN = os.getenv("LOGIN")
+PASSWORD = os.getenv("PASSWORD")
+LOCAL_PATH = os.getenv("LOCAL_PATH")
 
 # Send POST request to LLM API for processing
-def send_to_llm(llm_url, headers, data):
+def llm_send_request(llm_url, headers, data):
     response = requests.post(llm_url, json=data, headers=headers)
     if response.status_code == 200:
         return response.json()
@@ -27,7 +28,7 @@ def send_to_llm(llm_url, headers, data):
 # Main execution
 def main():
     # Open the file in read mode
-    file_path = local_path + 'curriculum-be-golang/100-ticketing/app/controllers/controllers.go'  # Replace with the path to your code file
+    file_path = LOCAL_PATH + 'curriculum-be-golang/100-ticketing/app/controllers/root.go'  # Replace with the path to your code file
     with open(file_path, 'r') as file:
         # Read the contents of the file
         file_contents = file.read()
@@ -41,24 +42,27 @@ def main():
     }
 
     headers = {
-        "Authorization": f"Bearer {key}",
+        "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json"
     }
 
-    llm_response = send_to_llm(llm_url, headers, data_llm)
-    # print (llm_response)
+    llm_response = llm_send_request(API_LLM_URL, headers, data_llm)
 
-    response_data = llm_response
+    if not llm_response:
+        print("No valid response from LLM API.")
+        return
 
     # Extract the content from the first choice's message
-    content_string = response_data['choices'][0]['message']['content']
-
-    # The content string contains a JSON object embedded in a larger text. We need to extract this JSON object.
-    # We can use a regex to find the JSON object within the content string.
-    import re
+    content_string = llm_response['choices'][0]['message']['content']
 
     # Find the JSON object within the content string
-    json_object_str = re.search(r'```json\n(.*?)\n```', content_string, re.DOTALL).group(1)
+    json_match = re.search(r'```json\n(.*?)\n```', content_string, re.DOTALL)
+    
+    if not json_match:
+        print("Failed to extract JSON object from response.")
+        return
+
+    json_object_str = json_match.group(1)
 
     # Parse the JSON object
     json_object = json.loads(json_object_str)
@@ -71,7 +75,7 @@ def main():
     print("Fixed Code:\n", file_content, "\n")
     print("Commit Message:\n", commit_message)
 
-    file_path = ''
+    # Save the fixed code
     with open(file_path, 'w') as file:
         file.write(file_content)
 
