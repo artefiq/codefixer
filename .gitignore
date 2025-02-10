@@ -1,1 +1,5 @@
 .env
+__pycache__
+project_test/sonar-project.properties
+project_test/.scannerwork
+project_test
