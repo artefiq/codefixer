@@ -1,98 +1,105 @@
 import requests
 import base64
 import subprocess
+import llm
+import os
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-# Encode login credentials as a base64 string for Basic Authentication
+API_KEY = os.getenv("API_KEY")
+API_LLM_URL = os.getenv("API_LLM_URL")
+HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+
 def auth_encode_basic(login, password):
-    credentials = f"{login}:{password}"
-    return base64.b64encode(credentials.encode()).decode()
+    """Encode login credentials as a base64 string for Basic Authentication."""
+    return base64.b64encode(f"{login}:{password}".encode()).decode()
 
-# Create a new project in SonarQube
-def sonar_create_project(api_url, headers, project_name):
-    payload = {"name": project_name, "project": project_name}
-
-    response = requests.post(f"{api_url}api/projects/create", headers=headers, params=payload)
+def send_post_request(url, headers, payload):
+    response = requests.post(url, headers=headers, params=payload)
     if response.status_code == 200:
-        print("Project created successfully!")
         return response.json()
-    else:
-        print(f"Failed to create project. Status code: {response.status_code}")
-        print(response.text)  # Debugging info
+    print(f"Request failed. Status code: {response.status_code}")
+    print(response.text)
     return None
 
-# Generate an analysis token for the project
-def sonar_generate_token(api_url, headers, project_name):
-    payload = {
-        "name": project_name,
-        "projectKey": project_name,
-        "type": "PROJECT_ANALYSIS_TOKEN",
-    }
+def sonar_create_project(api_url, project_name):
+    return send_post_request(f"{api_url}api/projects/create", HEADERS, {"name": project_name, "project": project_name})
 
-    response = requests.post(f"{api_url}api/user_tokens/generate", headers=headers, params=payload)
-    if response.status_code == 200:
-        print("Token generated successfully!")
-        response_json = response.json()
-        return {key: value for key, value in response_json.items() if key != 'token'}
-    else:
-        print(f"Failed to generate token. Status code: {response.status_code}")
-        print(response.text)  # Debugging info
-    return None
+def sonar_generate_token(api_url, project_name):
+    return send_post_request(f"{api_url}api/user_tokens/generate", HEADERS, {"name": project_name, "projectKey": project_name, "type": "PROJECT_ANALYSIS_TOKEN"})
 
-# Send GET request to search for issues
-def sonar_get_issues(api_url, headers, type, project_name):
-    params = {
-        "types": f"{type}", # change the issue type
-        'componentKeys': f"{project_name}" # change with project name
-    }
+def sonar_scan(project_name, sonar_project_path):
+    """Run unit tests with coverage and scan the code using SonarQube."""
+    print(f"Running unit test with coverage in '{sonar_project_path}'...")
+    sonar_run_command("npm run test -- --coverage", cwd=sonar_project_path)
 
-    response = requests.get(f"{api_url}api/issues/search", headers=headers, params=params)
-    if response.status_code == 200:
-        print("Issues searched successfully!\n")
-        return response.json()
-    else:
-        print(f"Failed to search issues. Status code: {response.status_code}")
-        print(response.text)  # For debugging info
-    return None
+    coverage_file = os.path.join(sonar_project_path, "coverage/lcov.info")
+    if not os.path.exists(coverage_file):
+        print("ERROR: 'coverage/lcov.info' not found. Ensure Jest is configured correctly.")
+        return
+    
+    print(f"Running SonarScanner in '{project_name}/'...")
+    print("Scan completed! Check results in SonarQube.")
 
-# Process issues and get responses
-def sonar_process_issues(issues):
+def sonar_get_issues(api_url, type, project_name):
+    """Retrieve issues from SonarQube."""
+    params = {"types": type, "componentKeys": project_name}
+    response = requests.get(f"{api_url}api/issues/search", headers=HEADERS, params=params)
+    return response.json() if response.status_code == 200 else None
+
+def sonar_get_hotspots(api_url, type, project_name):
+    """Retrieve security hotspots from SonarQube."""
+    params = {"types": type, "projectKey": project_name}
+    response = requests.get(f"{api_url}api/hotspots/search", headers=HEADERS, params=params)
+    return response.json() if response.status_code == 200 else None
+
+def process_code_fix(file_path, message, result_path, issue_type):
+    """Reads the file, sends data to LLM, and saves the fixed code."""
+    try:
+        with open(file_path + ".js", 'r') as file:
+            file_contents = file.read()
+        
+        system_message = "You are a helpful assistant that formats responses as JSON."
+        user_message = f"Include the corrected code in the 'code' key and provide a meaningful commit message in the 'commit_message' key. Code snippet: {file_contents} Issue message: {message}"
+        
+        if issue_type == "hotspot":
+            user_message += " Security hotspot detected."
+        
+        data_llm = {"messages": [{"role": "system", "content": system_message}, {"role": "user", "content": user_message}], "temperature": 1.0, "top_p": 0.9, "top_k": 30, "max_tokens": -1, "presence_penalty": -0.2, "frequency_penalty": 0.2, "stream": False}
+        
+        fixed_code_data = llm.llm_process_response(API_LLM_URL, HEADERS, data_llm, "codefix", result_path)
+        fixed_code = fixed_code_data.get("code", "")
+        
+        with open(file_path + "_fixed.js", 'w') as file:
+            file.write(fixed_code)
+    except Exception as e:
+        print(f"Error processing code fix: {e}")
+
+def process_issues(issues_data, issue_type, file_path, result_path):
+    """Processes issues or hotspots and triggers code fixing if applicable."""
+    if not issues_data:
+        print("Failed to fetch issues.")
+        return
+    
+    issues = issues_data.get("hotspots" if issue_type == "hotspot" else "issues", [])
+    if not issues:
+        print("No issues found.")
+        return
+    
     for i, issue in enumerate(issues, start=1):
-        print(f"Processing issue: {i}")
-
-        # Extract issue details
-        issue_key = issue['key']
-        rule = issue['rule']
-        component = issue['component']
-        severity = issue['severity']
-        project = issue['project']
-        line = issue.get('line', 'N/A')
-        text_range = issue.get('textRange', {})
-        message = issue['message']
-
-        # Print issue details
-        print(f"Issue Key: {issue_key}")
-        print(f"Rule: {rule}")
-        print(f"Component: {component}")
-        print(f"Severity: {severity}")
-        print(f"Project: {project}")
-        print(f"Line: {line}")
-        print(f"Message: {message}")
-
-        # Extract file path and line number
-        file_name = component.split(':')[1] if ':' in component else component
-        file_path_line = f"{file_name}:{text_range.get('startLine', 'Unknown')}"
-        print(f"File Path: {file_path_line}\n")
+        print(f"Processing {issue_type}: {i}")
+        print(f"Key: {issue.get('key')}")
+        print(f"Component: {issue.get('component')}")
+        print(f"Message: {issue.get('message')}\n")
+        
+        process_code_fix(file_path, issue.get('message'), result_path, issue_type)
 
 def sonar_run_command(command, cwd=None):
-    """Jalankan perintah shell dalam folder tertentu."""
+    """Run a shell command in a specified directory."""
     process = subprocess.Popen(command, shell=True, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
     for line in process.stdout:
         print(line, end="")
-
     process.stdout.close()
     process.wait()

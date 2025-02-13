@@ -13,7 +13,13 @@ LOCAL_PATH = os.getenv("LOCAL_PATH")
 CLONE_REPO_URL = os.getenv("CLONE_REPO_URL")
 
 NEW_REPO_NAME = "curriculum-be-golang"
-LOCAL_REPO_PATH = f"{LOCAL_PATH}github-api-test"
+LOCAL_REPO_PATH = os.path.join(LOCAL_PATH, "github-api-test")
+
+# Common headers for GitHub API requests
+HEADERS = {
+    "Authorization": f"token {GITHUB_TOKEN}",
+    "Accept": "application/vnd.github.v3+json"
+}
 
 # Helper function to run Git commands
 def git_run_command(command, repo_path):
@@ -22,19 +28,14 @@ def git_run_command(command, repo_path):
             command, cwd=repo_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
             text=True, check=True
         )
-        print(f"Success: {result.stdout}")
+        print(f"Success: {result.stdout.strip()}")
     except subprocess.CalledProcessError as e:
-        print(f"Error: {e.stderr}")
+        print(f"Error: {e.stderr.strip()}")
 
 # Function to create a new GitHub repository
 def github_create_repo(repo_name):
-    headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-    data = {"name": repo_name, "private": False}
+    response = requests.post("https://api.github.com/user/repos", headers=HEADERS, json={"name": repo_name, "private": False})
     
-    response = requests.post("https://api.github.com/user/repos", headers=headers, json=data)
     if response.status_code == 201:
         print(f"Repository '{repo_name}' created successfully.")
         return response.json().get("ssh_url")
@@ -43,13 +44,9 @@ def github_create_repo(repo_name):
 
 # Function to delete a GitHub repository
 def github_delete_repo(repo_name):
-    headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json"
-    }
     url = f"https://api.github.com/repos/{GITHUB_USERNAME}/{repo_name}"
+    response = requests.delete(url, headers=HEADERS)
     
-    response = requests.delete(url, headers=headers)
     if response.status_code == 204:
         print(f"Repository '{repo_name}' deleted successfully.")
     else:
