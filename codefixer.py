@@ -70,6 +70,8 @@ def main():
     # Change LLM URL if necessary
     if (args['llm_model'] == "openai"):
         API_LLM_URL = os.getenv("API_LLM_URL_2")
+    else:
+        API_LLM_URL = os.getenv("API_LLM_URL")
 
     # # Step 1: Clone Repository
     # git.git_run_command(["git", "clone", CLONE_REPO_URL], LOCAL_REPO_PATH)
@@ -89,7 +91,7 @@ def main():
                 print("Generated Token Info:", token_response)
     
     # Step 3: Generate unit tests for the project
-    if (args['unit_test'] == 1): llm.generate_test_unit(project_name, LOCAL_PATH, API_KEY, API_LLM_URL)
+    if (args['unit_test'] == 1): llm.generate_test_unit(API_LLM_URL, API_KEY, project_name)
 
     # Step 4: Scan the project code with SonarQube
     if (args['jest'] == 1): sonar.sonar_run_command("npm run test -- --coverage", cwd=SONAR_PROJECT_PATH)
@@ -98,11 +100,11 @@ def main():
     # Step 5: Retrieve and process issues and hotspots from SonarQube, then fix it using LLM API
     if (args['sonar_hotspot'] == 1):
         hotspots_data = sonar.sonar_get_hotspots(API_URL, headers, "", project_name)
-        sonar.process_issues(hotspots_data, "hotspot", os.path.join(LOCAL_PATH, 'codefixer/project_test/server'), result_path=os.path.join(LOCAL_PATH, f"codefixer/{project_name}"))
+        sonar.process_issues(API_LLM_URL, API_KEY, hotspots_data, "hotspot", os.path.join(LOCAL_PATH, 'codefixer/project_test/server'), result_path=os.path.join(LOCAL_PATH, f"codefixer/{project_name}"))
     
     if (args['sonar_issue'] == 1):
         issues_data = sonar.sonar_get_issues(API_URL, headers, "BUG", "reactnative")
-        sonar.process_issues(issues_data, "issue", os.path.join(LOCAL_PATH, 'codefixer/test_index'), result_path=os.path.join(LOCAL_PATH, "codefixer/"))
+        sonar.process_issues(API_LLM_URL, API_KEY, issues_data, "issue", os.path.join(LOCAL_PATH, 'codefixer/test_index'), result_path=os.path.join(LOCAL_PATH, "codefixer/"))
     
     # # Step 7: Create a new repository on GitHub
     # new_repo_ssh_url = git.github_create_repo(NEW_REPO_NAME)

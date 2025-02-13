@@ -43,19 +43,19 @@ def sonar_scan(project_name, sonar_project_path):
     print(f"Running SonarScanner in '{project_name}/'...")
     print("Scan completed! Check results in SonarQube.")
 
-def sonar_get_issues(api_url, type, project_name):
+def sonar_get_issues(api_url, headers, type, project_name):
     """Retrieve issues from SonarQube."""
     params = {"types": type, "componentKeys": project_name}
-    response = requests.get(f"{api_url}api/issues/search", headers=HEADERS, params=params)
+    response = requests.get(f"{api_url}api/issues/search", headers=headers, params=params)
     return response.json() if response.status_code == 200 else None
 
-def sonar_get_hotspots(api_url, type, project_name):
+def sonar_get_hotspots(api_url, headers, type, project_name):
     """Retrieve security hotspots from SonarQube."""
     params = {"types": type, "projectKey": project_name}
-    response = requests.get(f"{api_url}api/hotspots/search", headers=HEADERS, params=params)
+    response = requests.get(f"{api_url}api/hotspots/search", headers=headers, params=params)
     return response.json() if response.status_code == 200 else None
 
-def process_code_fix(file_path, message, result_path, issue_type):
+def process_code_fix(llm_url, llm_key, file_path, message, result_path, issue_type):
     """Reads the file, sends data to LLM, and saves the fixed code."""
     try:
         with open(file_path + ".js", 'r') as file:
@@ -69,15 +69,12 @@ def process_code_fix(file_path, message, result_path, issue_type):
         
         data_llm = {"messages": [{"role": "system", "content": system_message}, {"role": "user", "content": user_message}], "temperature": 1.0, "top_p": 0.9, "top_k": 30, "max_tokens": -1, "presence_penalty": -0.2, "frequency_penalty": 0.2, "stream": False}
         
-        fixed_code_data = llm.llm_process_response(API_LLM_URL, HEADERS, data_llm, "codefix", result_path)
-        fixed_code = fixed_code_data.get("code", "")
-        
-        with open(file_path + "_fixed.js", 'w') as file:
-            file.write(fixed_code)
+        llm.llm_process_response(llm_url, llm_key, data_llm, "codefix", file_path, result_path)
+
     except Exception as e:
         print(f"Error processing code fix: {e}")
 
-def process_issues(issues_data, issue_type, file_path, result_path):
+def process_issues(llm_url, llm_key, issues_data, issue_type, file_path, result_path):
     """Processes issues or hotspots and triggers code fixing if applicable."""
     if not issues_data:
         print("Failed to fetch issues.")
@@ -94,7 +91,7 @@ def process_issues(issues_data, issue_type, file_path, result_path):
         print(f"Component: {issue.get('component')}")
         print(f"Message: {issue.get('message')}\n")
         
-        process_code_fix(file_path, issue.get('message'), result_path, issue_type)
+        process_code_fix(llm_url, llm_key, file_path, issue.get('message'), result_path, issue_type)
 
 def sonar_run_command(command, cwd=None):
     """Run a shell command in a specified directory."""

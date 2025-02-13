@@ -9,23 +9,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Define the API endpoints and keys from environment variables
-API_KEY = os.getenv("API_KEY")
-API_LLM_URL = os.getenv("API_LLM_URL")
 LOCAL_PATH = os.getenv("LOCAL_PATH")
-
-# Common headers for API requests
-HEADERS = {
-    "Authorization": f"Bearer {API_KEY}",
-    "Content-Type": "application/json"
-}
 
 def get_js_files(directory):
     return [os.path.join(root, file) for root, _, files in os.walk(directory) for file in files if file.endswith('.js')]
 
-def llm_send_request(llm_url, data):
+def llm_send_request(llm_url, llm_token, data):
     data["stream"] = True
     try:
-        with requests.post(llm_url, json=data, headers=HEADERS, stream=True, timeout=100) as response:
+        with requests.post(llm_url, json=data, headers=create_header(llm_token), stream=True, timeout=100) as response:
             if response.status_code == 200:
                 result, start_time = "", time.time()
                 for chunk in response.iter_content(chunk_size=1024):
@@ -45,8 +37,8 @@ def llm_send_request(llm_url, data):
         print(f"Request error: {e}")
     return None
 
-def llm_process_response(data_llm, mode, result_path):
-    response = llm_send_request(API_LLM_URL, data_llm)
+def llm_process_response(llm_url, llm_token, data_llm, mode, file_path, result_path):
+    response = llm_send_request(llm_url, llm_token, data_llm)
     if not response:
         print("No valid response from LLM API.")
         return
@@ -59,7 +51,7 @@ def llm_process_response(data_llm, mode, result_path):
     if not json_object:
         print("Unexpected response format.")
         return
-    process_response(json_object, mode, result_path)
+    process_response(json_object, mode, file_path, result_path)
 
 def extract_json_object(cleaned_json):
     if isinstance(cleaned_json, dict):
@@ -71,21 +63,25 @@ def extract_json_object(cleaned_json):
             return cleaned_json
     return None
 
-def process_response(json_object, mode, result_path):
-    if mode == "codefix":
-        print("\nFixed Code:\n", json_object.get('code', ''))
-        print("Commit Message:\n", json_object.get('commit_message', ''))
-    elif mode == "test_unit":
-        code = json_object.get("code", "")
-        if code:
+def process_response(json_object, mode, file_path, result_path):
+    code = json_object.get("code", "")
+    if code:
+        if mode == "codefix":
+            # os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            with open(file_path + "_fixed.js", 'w', encoding="utf-8") as file:
+                file.write(code)
+            print(f"Code saved to {file_path}_fixed.js\n")
+
+
+        elif mode == "test_unit":
             os.makedirs(os.path.dirname(result_path), exist_ok=True)
             with open(result_path, "w", encoding="utf-8") as file:
                 file.write(code)
-            print(f"Code saved to {result_path}")
-        else:
-            print("No code found in JSON.")
+            print(f"Code saved to {result_path}\n")
+    else:
+        print("No code found in JSON.")
 
-def generate_test_unit(project_name):
+def generate_test_unit(llm_url, llm_token, project_name):
     js_files = get_js_files(os.path.join(LOCAL_PATH, f'codefixer/{project_name}/app'))
     js_files.append(os.path.join(LOCAL_PATH, f'codefixer/{project_name}/server.js'))
     for file_path in js_files:
@@ -96,10 +92,25 @@ def generate_test_unit(project_name):
             file_contents = file.read()
         data_llm = {
             "messages": [
-                {"role": "system", "content": f"Generate unit tests for {file_name} using Jest & Supertest for SonarQube."},
-                {"role": "user", "content": f"Ensure 100% coverage: {file_contents}"}
+                {
+                    "role": "system",
+                    "content": (f"give test unit for this code to be used in sonar-scanner, using supertest and jest, "
+                                f"only give the complete test code as 'code', and 'commit_message' in a json "
+                                f"with no extra data, path to my app file is placed in ../{relative_path} "
+                                f"named as {file_name}")
+                },
+                {
+                    "role": "user",
+                    "content": f"make it so i can get 100 percent code coverage in sonarqube {file_contents}"
+                }
             ],
             "model": "deepseek",
             "stream": True
         }
-        llm_process_response(data_llm, "test_unit", result_path)
+        llm_process_response(llm_url, llm_token, data_llm, "test_unit", "", result_path)
+
+def create_header(llm_token):
+    return {
+        "Authorization": f"Bearer {llm_token}",
+        "Content-Type": "application/json"
+    }

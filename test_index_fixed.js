@@ -1,1 +1,1 @@
-Remove the commented-out import statement for REGEX and all related code.
+export const getNumberAllowNegative = (string = '') => string.replace(/[^-?\.?\d*]+/g, '');
