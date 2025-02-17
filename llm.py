@@ -14,10 +14,54 @@ LOCAL_PATH = os.getenv("LOCAL_PATH")
 def get_js_files(directory):
     return [os.path.join(root, file) for root, _, files in os.walk(directory) for file in files if file.endswith('.js')]
 
-def llm_send_request(llm_url, llm_token, data):
+def request_payload (model, system_message, user_message):
+    if (model=="dev"):
+        return {
+            "messages": [
+                {
+                    "role": "system",
+                    "content": system_message
+                },
+                {
+                    "role": "user",
+                    "content": user_message
+                }
+            ]
+        }
+
+    elif (model=="openai"):
+        return {
+            "model": "gpt-4o",
+            "temperature": 1,
+            "max_tokens": 800,
+            "top_p": 1,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": system_message
+                        }
+                    ]
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": user_message
+                        }
+                    ]
+                }
+            ]
+        }
+
+def llm_send_request(llm_url, llm_token, llm_model, data):
     data["stream"] = True
+    print(json.dumps(data, indent=4))
     try:
-        with requests.post(llm_url, json=data, headers=create_header(llm_token), stream=True, timeout=100) as response:
+        with requests.post(llm_url, json=data, headers=create_header(llm_token, llm_model), stream=True, timeout=100) as response:
             if response.status_code == 200:
                 result, start_time = "", time.time()
                 for chunk in response.iter_content(chunk_size=1024):
@@ -27,18 +71,20 @@ def llm_send_request(llm_url, llm_token, data):
                             if chunk_json.startswith('data:'):
                                 chunk_json = chunk_json[5:].strip()
                             chunk_data = json.loads(chunk_json)
-                            result += chunk_data.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                            if (llm_model=="dev"): result += chunk_data.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                            elif (llm_model=="openai"): result += chunk_data.get("payload", {}).get("content", "")
                         except (json.JSONDecodeError, Exception) as e:
                             print(f"Error processing chunk: {e}")
                 print(f"Execution Time: {time.time() - start_time:.6f} seconds")
+                print(result)
                 return result
-            print(f"Failed LLM response. Status: {response.status_code}")
+            print(f"Failed LLM response. Status: {response.status_code}. Text: {response.text}")
     except requests.exceptions.RequestException as e:
         print(f"Request error: {e}")
     return None
 
-def llm_process_response(llm_url, llm_token, data_llm, mode, file_path, result_path):
-    response = llm_send_request(llm_url, llm_token, data_llm)
+def llm_process_response(llm_url, llm_token, llm_model, llm_data, mode, file_path, result_path):
+    response = llm_send_request(llm_url, llm_token, llm_model, llm_data)
     if not response:
         print("No valid response from LLM API.")
         return
@@ -72,16 +118,16 @@ def process_response(json_object, mode, file_path, result_path):
                 file.write(code)
             print(f"Code saved to {file_path}_fixed.js\n")
 
-
         elif mode == "test_unit":
             os.makedirs(os.path.dirname(result_path), exist_ok=True)
             with open(result_path, "w", encoding="utf-8") as file:
                 file.write(code)
-            print(f"Code saved to {result_path}\n")
+            print(f"Test unit saved to {result_path}\n")
+
     else:
         print("No code found in JSON.")
 
-def generate_test_unit(llm_url, llm_token, project_name):
+def generate_test_unit(llm_url, llm_token, model, project_name):
     js_files = get_js_files(os.path.join(LOCAL_PATH, f'codefixer/{project_name}/app'))
     js_files.append(os.path.join(LOCAL_PATH, f'codefixer/{project_name}/server.js'))
     for file_path in js_files:
@@ -90,27 +136,53 @@ def generate_test_unit(llm_url, llm_token, project_name):
         result_path = os.path.join(LOCAL_PATH, f'codefixer/{project_name}/__tests__/{file_name}.test.js')
         with open(file_path, 'r') as file:
             file_contents = file.read()
-        data_llm = {
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (f"give test unit for this code to be used in sonar-scanner, using supertest and jest, "
+
+        system_message = (f"give test unit for this code to be used in sonar-scanner, using supertest and jest, "
                                 f"only give the complete test code as 'code', and 'commit_message' in a json "
                                 f"with no extra data, path to my app file is placed in ../{relative_path} "
                                 f"named as {file_name}")
-                },
-                {
-                    "role": "user",
-                    "content": f"make it so i can get 100 percent code coverage in sonarqube {file_contents}"
-                }
-            ],
-            "model": "deepseek",
-            "stream": True
-        }
-        llm_process_response(llm_url, llm_token, data_llm, "test_unit", "", result_path)
+        
+        user_message = f"make it so i can get 100 percent code coverage in sonarqube {file_contents}"
 
-def create_header(llm_token):
-    return {
-        "Authorization": f"Bearer {llm_token}",
-        "Content-Type": "application/json"
-    }
+        data_llm = request_payload(model, system_message, user_message)
+        llm_process_response(llm_url, llm_token, model, data_llm, "test_unit", "", result_path)
+
+def fix_unit_test(llm_url, llm_token, model, data):
+    # Implementasi fungsi untuk memperbaiki kode unit test
+    relative_path = (f"/home/Artefiq/code/telkom/codefixer/{data['File_path']}")
+    file_name = (data['File'])
+    result_path = (f"/home/Artefiq/code/telkom/codefixer/project_test/__tests__/{os.path.splitext(os.path.basename(data['File']))[0]}.test.js")
+    with open(result_path, 'r') as file:
+        original_file = file.read()
+
+    system_message = (f"give test unit for this code to be used in sonar-scanner, using supertest and jest, "
+                                f"only give the complete test code as 'code', and 'commit_message' in a json "
+                                f"with no extra data, path to my app file is placed in ../{relative_path}"
+                                f"named as {file_name}")
+        
+    user_message = f"make it so i can get 100 percent code coverage in sonarqube {data['Code']}, implement the generated code to this code without changing its functionality {original_file}"
+
+    data_llm = request_payload(model, system_message, user_message)
+    llm_process_response(llm_url, llm_token, model, data_llm, "test_unit", "", result_path)
+
+def create_header(llm_token, llm_model):
+    if (llm_model == "dev"):
+        return {
+            "Authorization": f"Bearer {llm_token}",
+            "Content-Type": "application/json"
+        }
+    elif (llm_model == "openai"):
+        return {
+            'accept': 'application/json',
+            'X-Service': 'code-fixer',
+            'Authorization': f'Basic {llm_token}',
+            'Content-Type': 'application/json'
+        }
+
+def clean_prompt(prompt):
+    
+    # Mengganti kutip tunggal dengan kutip ganda hanya untuk JSON
+    prompt = prompt.replace("'", '"')
+    
+    # Pastikan hasilnya adalah JSON string valid
+    return prompt

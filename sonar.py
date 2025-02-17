@@ -55,7 +55,7 @@ def sonar_get_hotspots(api_url, headers, type, project_name):
     response = requests.get(f"{api_url}api/hotspots/search", headers=headers, params=params)
     return response.json() if response.status_code == 200 else None
 
-def process_code_fix(llm_url, llm_key, file_path, message, result_path, issue_type):
+def process_code_fix(llm_url, llm_key, model, file_path, message, result_path, issue_type):
     """Reads the file, sends data to LLM, and saves the fixed code."""
     try:
         with open(file_path + ".js", 'r') as file:
@@ -66,15 +66,18 @@ def process_code_fix(llm_url, llm_key, file_path, message, result_path, issue_ty
         
         if issue_type == "hotspot":
             user_message += " Security hotspot detected."
+
+        user_message = llm.clean_prompt(user_message)
+        system_message = llm.clean_prompt(system_message)
         
-        data_llm = {"messages": [{"role": "system", "content": system_message}, {"role": "user", "content": user_message}], "temperature": 1.0, "top_p": 0.9, "top_k": 30, "max_tokens": -1, "presence_penalty": -0.2, "frequency_penalty": 0.2, "stream": False}
+        data_llm = llm.request_payload(model, system_message, user_message)
         
-        llm.llm_process_response(llm_url, llm_key, data_llm, "codefix", file_path, result_path)
+        llm.llm_process_response(llm_url, llm_key, model, data_llm, "codefix", file_path, result_path)
 
     except Exception as e:
         print(f"Error processing code fix: {e}")
 
-def process_issues(llm_url, llm_key, issues_data, issue_type, file_path, result_path):
+def process_issues(llm_url, llm_key, model, issues_data, issue_type, file_path, result_path):
     """Processes issues or hotspots and triggers code fixing if applicable."""
     if not issues_data:
         print("Failed to fetch issues.")
@@ -91,12 +94,19 @@ def process_issues(llm_url, llm_key, issues_data, issue_type, file_path, result_
         print(f"Component: {issue.get('component')}")
         print(f"Message: {issue.get('message')}\n")
         
-        process_code_fix(llm_url, llm_key, file_path, issue.get('message'), result_path, issue_type)
+        process_code_fix(llm_url, llm_key, model, file_path, issue.get('message'), result_path, issue_type)
 
 def sonar_run_command(command, cwd=None):
-    """Run a shell command in a specified directory."""
+    """Run a shell command in a specified directory and capture its output."""
     process = subprocess.Popen(command, shell=True, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    for line in process.stdout:
-        print(line, end="")
+    
+    output = []  # List to store output lines
+    
+    for line in iter(process.stdout.readline, ''):
+        print(line, end="")  # Print output in real-time
+        output.append(line)  # Store output in list
+
     process.stdout.close()
     process.wait()
+
+    return "".join(output)  # Return captured output as a single string
